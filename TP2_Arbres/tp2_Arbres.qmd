@@ -1,0 +1,335 @@
+---
+title: Rapport du TP2_Arbres
+author: IKHLEF Aimene
+date: 2023/09/28
+format: pdf
+fig-align: center
+execute:
+  enabled: true
+jupyter: python3
+---
+
+```{python}
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import graphviz
+from matplotlib import rc
+import seaborn as sns
+from sklearn import tree, datasets, model_selection
+from tp_arbres_source import (rand_gauss, rand_bi_gauss, rand_tri_gauss,
+                              rand_checkers, rand_clown,
+                              plot_2d, frontiere)
+```
+## Question 1
+En régression, il est possible de sélectionner une fonction de perte telle que l'erreur quadratique moyenne, qui réduit la variance et minimise la perte L2 en moyennant les nœuds terminaux. Alternativement, on peut minimiser la perte L1 en utilisant la médiane des nœuds terminaux. D'autres critères, tels que l'erreur quadratique moyenne de Friedman ou le critère de Poisson, peuvent également être envisagés.
+
+## Question 2
+
+On simule à l'aide de rand_checkers des échantillons de taille $n=456$.
+Ces données serviront à construire deux arbres, l'un utilisant le critère de Gini et l'autre utilisant l'entropie.
+On affiche ensuite les courbes donnant le pourcentage d'erreur en fonction de la profondeur de l'arbre.
+
+```{python}
+np.random.seed(15)
+
+# Génération des données
+n = 456
+data = rand_checkers(n//4, n//4, n//4, n//4)
+X_train = data[:, :2]
+y_train = data[:, 2]
+
+# Fonction pour appliquer une fonction à chaque élément d'un dictionnaire de listes
+def fmap_dict_list(f, dic):
+    return {key: list(map(f, value)) for key, value in dic.items()}
+
+# Création de tous les classificateurs
+def create_all_classifiers(criterions, depths):
+    classifiers = defaultdict(list)
+    for criterion, max_depth in product(criterions, depths):
+        classifier = tree.DecisionTreeClassifier(
+            criterion=criterion,
+            max_depth=max_depth,
+        )
+        classifiers[criterion].append(classifier)
+    return classifiers
+
+# Entraînement de tous les classificateurs sur les données d'entraînement
+def fit_all_classifiers(classifiers, X_train, y_train):
+    return fmap_dict_list(
+        lambda classifier: classifier.fit(X_train, y_train),
+        classifiers
+    )
+
+# Calcul de tous les scores des classificateurs sur les données d'entraînement
+def compute_all_scores(classifiers, X_test, y_test):
+    return fmap_dict_list(
+        lambda classifier: classifier.score(X_test, y_test),
+        classifiers
+    )
+
+# Liste des critères et profondeurs à tester
+criterions = ["gini", "entropy"]
+depths = range(1, 14)
+
+# Création des classificateurs, entraînement et calcul des scores
+classifiers = create_all_classifiers(criterions, depths)
+classifiers = fit_all_classifiers(classifiers, X_train, y_train)
+scores = compute_all_scores(classifiers, X_train, y_train)
+
+# Affichage des scores
+print(scores)
+
+# Tracé des courbes de score
+plt.figure()
+for criterion in scores.keys():
+    plt.plot(depths, scores[criterion], label=f"{criterion} score")
+
+plt.xlabel('Max depth')
+plt.ylabel('Accuracy Score')
+plt.legend()
+plt.draw()
+
+```
+
+Ici on trouve que la profondeur qui minimise le pourcentage d'erreur (ou maximise le score) est tout simplement la profondeur maximale de notre boucle, ici sa valeur est de 12.
+
+## Question 3
+
+plus la profondeur sera grande, plus l'erreur sera petite. Ainsi avec les profondeurs testées (de 1 à 13)
+
+```{python}
+
+np.random.seed(15)
+
+# Trouver la meilleure profondeur
+best_depth = np.argmax(scores["entropy"]) + 1
+assert best_depth == 12
+
+# Sélectionner le meilleur classificateur
+best_classifier = classifiers["entropy"][best_depth - 1]
+
+# Tracer les frontières de décision
+plt.figure(figsize=(15, 10))
+
+# Tracé 1
+plt.subplot(2, 2, 1)
+frontiere(
+    lambda x: best_classifier.predict(x.reshape((1, -1))),
+    X_train, y_train,
+    step=100, samples=False
+)
+
+# Tracé 2
+plt.subplot(2, 1, 1)
+plot_2d(X_train, y_train)
+frontiere(
+    lambda x: best_classifier.predict(x.reshape((1, -1))),
+    X_train, y_train,
+    step=100, samples=False
+)
+
+```
+
+Le modèle avec une profondeur maximale (dans ce cas, 12) présente un score très proche de 1, ce qui indique un surajustement du modèle. Cela signifie que le modèle ne généralisera pas bien sur de nouvelles données, comme illustré dans la figure.
+
+## Question 4
+
+```{python}
+#| echo: false
+#| output: false
+
+tree.plot_tree(dt_entropy)
+data = tree.export_graphviz(dt_entropy, filled=True, rounded=True)
+graph = graphviz.Source(data)
+graph.render('./binary_tree_entropy', format='pdf')
+```
+
+![Arbre de décision](./binary_tree_entropy.pdf)
+
+Voici l'arbre de décision résultant, où chaque nœud représente une condition vraie ou fausse qui détermine le partitionnement des données. Si la condition est vraie, nous continuons vers le nœud suivant correspondant, sinon nous passons au nœud correspondant à "faux". Cette procédure se répète jusqu'à ce que nous atteignions la profondeur maximale de l'arbre.
+
+## Question 5
+
+On va maintenant utiliser les arbres précedemment trouvés pour calculer le score sur un nouvel échantillon test avec $n=160$
+
+```{python}
+n_test = 160
+
+# Générer des données de test
+data_test = rand_checkers(n_test//4, n_test//4, n_test//4, n_test//4)
+X_test = data_test[:, :2]
+y_test = data_test[:, 2]
+
+# Calculer les scores sur les données de test
+scores_test = compute_all_scores(classifiers, X_test, y_test)
+
+# Tracer les courbes de score pour les données d'entraînement et de test
+plt.figure(figsize=(10, 10))
+
+for i, criterion in enumerate(scores.keys()):
+    plt.subplot(2, 1, i+1)
+
+    # Tracer le score pour les données d'entraînement
+    plt.plot(depths, scores[criterion], label=f"Training {criterion.capitalize()} Score")
+    print(f"Training {criterion} Scores: {scores[criterion]}")
+
+    # Tracer le score pour les données de test
+    plt.plot(depths, scores_test[criterion], label=f"Test {criterion.capitalize()} Score")
+    print(f"Test {criterion} Scores: {scores_test[criterion]}")
+
+    plt.title(f"{criterion.capitalize()} Criterion", weight="bold")
+    plt.xlabel("Max Depth")
+    plt.ylabel("Accuracy Score")
+    plt.legend()
+
+plt.draw()
+
+```
+
+Nous constatons que la profondeur optimale pour maximiser le score est de 9, que ce soit pour le critère de Gini ou pour l'entropie. Ainsi, nous avons sélectionné un arbre moins profond par rapport à nos précédents résultats, ce qui contribue à réduire le risque de surajustement.
+
+
+## Question 6
+
+```{python}
+digits = datasets.load_digits()
+X_train, X_test, Y_train, Y_test = model_selection.train_test_split(digits.data, digits.target, train_size=0.8, test_size=0.2)
+
+# Initialisation des classificateurs pour l'entropie et le Gini
+dt_entropy = tree.DecisionTreeClassifier(criterion='entropy')
+dt_gini = tree.DecisionTreeClassifier(criterion='gini')
+
+# Entraîner les classificateurs sur les données d'entraînement
+dt_entropy.fit(X_train, Y_train)
+dt_gini.fit(X_train, Y_train)
+
+# Définir la limite de profondeur maximale à tester
+dmax = 15
+
+# Initialiser les tableaux pour stocker les scores
+scores_entropy_test = np.zeros(dmax)
+scores_gini_test = np.zeros(dmax)
+scores_entropy_train = np.zeros(dmax)
+scores_gini_train = np.zeros(dmax)
+
+# Parcourir différentes profondeurs et calculer les scores
+for i in range(dmax):
+    # Classificateurs avec différentes profondeurs
+    dt_entropy = tree.DecisionTreeClassifier(criterion='entropy', max_depth=i+1)
+    dt_gini = tree.DecisionTreeClassifier(criterion='gini', max_depth=i+1)
+
+    # Entraîner les classificateurs
+    dt_entropy.fit(X_train, Y_train)
+    dt_gini.fit(X_train, Y_train)
+
+    # Calculer les scores pour les données d'entraînement et de test
+    scores_entropy_test[i] = dt_entropy.score(X_test, Y_test)
+    scores_entropy_train[i] = dt_entropy.score(X_train, Y_train)
+    scores_gini_test[i] = dt_gini.score(X_test, Y_test)
+    scores_gini_train[i] = dt_gini.score(X_train, Y_train)
+
+# Tracer les scores sur les ensembles d'entraînement et de test
+fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(14, 6))
+
+# Scores d'entraînement
+axes[0].plot(scores_entropy_train, label='Entropy criterion', marker='o')
+axes[0].plot(scores_gini_train, label='Gini criterion', marker='x')
+axes[0].legend(loc='lower right')
+axes[0].set_title('Score on training set')
+axes[0].set_xlabel('Max depth')
+axes[0].set_ylabel('Accuracy Score')
+axes[0].grid(True, which='both', linestyle='--', linewidth=0.5)
+
+# Scores de test
+axes[1].plot(scores_entropy_test, label='Entropy criterion', marker='o')
+axes[1].plot(scores_gini_test, label='Gini criterion', marker='x')
+axes[1].legend(loc='lower right')
+axes[1].set_title('Score on test set')
+axes[1].set_xlabel('Max depth')
+axes[1].set_ylabel('Accuracy Score')
+axes[1].grid(True, which='both', linestyle='--', linewidth=0.5)
+
+plt.tight_layout()
+plt.show()
+print("Scores with entropy criterion: ", scores_entropy)
+print("Scores with Gini criterion: ", scores_gini)
+```
+
+Nous observons les mêmes problèmes de surapprentissage que dans notre jeu de données simulées. En effet, la précision sur les données d'entraînement atteint presque 98 %, tandis que sur les données de test, elle ne dépasse jamais les 90 %. Cela signifie que dans le premier cas, la précision est surestimée.
+
+## Question 7
+
+On utilise la validation croisée pour effectuer le choix du paramètre de profondeur.
+
+```{python}
+classifiers = create_all_classifiers(criterions, depths)
+
+# les scores de validation croisée pour chaque classificateur
+scores_crossval = fmap_dict_list(
+    lambda classifier: np.mean(model_selection.cross_val_score(
+        classifier, X, y,
+        cv=model_selection.KFold(5, shuffle=True, random_state=0)
+    )),
+    classifiers
+)
+
+
+plt.figure(figsize=(10, 10))
+
+for i, criterion in enumerate(scores.keys()):
+    plt.subplot(2, 1, i + 1)
+
+    
+    plt.plot(depths, scores[criterion], label=f"Training {criterion.capitalize()} Score")
+
+    # Tracer le score pour les données de test
+    plt.plot(depths, scores_test[criterion], label=f"Test {criterion.capitalize()} Score")
+
+    # Tracer le score pour la validation croisée
+    plt.plot(depths, scores_crossval[criterion], label=f"Cross Validation {criterion.capitalize()} Score")
+
+    plt.title(f"{criterion.capitalize()} Criterion", weight="bold")
+    plt.xlabel("Max Depth")
+    plt.ylabel("Accuracy Score")
+    plt.legend()
+
+plt.draw()
+
+```
+
+### Question 8
+
+Dans cette question on affiche la courbe d'apprentissage qui mesure l'effet du score en fonction du nombre de données durant la période d'apprentissage du modèle.
+
+```{python}
+for criterion in classifiers.keys():
+    fig, ax = plt.subplots(nrows=3, ncols=2, figsize=(15, 17), sharey=True)
+
+    skip = 2
+    for i, classifier in enumerate(classifiers[criterion][:12:skip]):
+        sub_ax = ax[i // 2, i % 2]
+
+        model_selection.LearningCurveDisplay.from_estimator(
+            classifier,
+            X=X, y=y,
+            train_sizes=np.linspace(0.001, 1, 20),
+            line_kw={"marker": "o"},
+            std_display_style="fill_between",
+            score_name="Accuracy",
+            ax=sub_ax,
+            cv=model_selection.KFold(5, shuffle=True, random_state=0)
+        )
+
+    
+        sub_ax.set_title(
+            (f"Learning Curve for {criterion.capitalize()} criterion "
+             f"(max_depth={i * skip + 1})"),
+            weight="bold"
+        )
+
+        sub_ax.legend(["Training Score", "Test Score"])
+
+```
+
+Dans notre situation, la performance sur l'ensemble d'apprentissage reste élevée indépendamment de la taille de l'échantillon. Alors, la performance sur l'ensemble de test augmente à mesure que la taille de l'échantillon d'apprentissage augmente, mais elle atteint un plateau à un certain point.
