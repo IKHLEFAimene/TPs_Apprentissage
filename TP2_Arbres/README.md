@@ -1,6 +1,6 @@
 # TP2 - Rapports de TP2-Arbres
 
-Ce répertoire contient les rapports de TP du cours HAX907X, ainsi que les éléments nécessaires pour les reproduire. Les TP ont été réalisés par IKHLEF Aimene.
+Ce répertoire contient le rapport de TP2 du cours HAX907X, ainsi que les éléments nécessaires pour le reproduire. Le TP est réalisés par IKHLEF Aimene.
 
 ## Reproductibilité
 
